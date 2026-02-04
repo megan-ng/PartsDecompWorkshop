@@ -1,0 +1,28 @@
+diff --git a/main.cpp b/main.cpp
+index 0a6e158..36d2ef4 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -183,19 +183,19 @@ int main(int argc, char* argv[]){
+     itk::StdStreamLogOutput::Pointer itkcout = itk::StdStreamLogOutput::New();
+     itk::StdStreamLogOutput::Pointer itkfout = itk::StdStreamLogOutput::New();
+     itkcout->SetStream(std::cout);
+-    logger->SetLevelForFlushing(itk::LoggerBaseEnums::PriorityLevel::DEBUG);
++    logger->SetLevelForFlushing(itk::LoggerBase::PriorityLevelType::DEBUG);
+ 
+ #ifdef DEBUG_MODE
+-    logger->SetPriorityLevel(itk::LoggerBaseEnums::PriorityLevel::DEBUG);
++    logger->SetPriorityLevel(itk::LoggerBase::PriorityLevelType::DEBUG);
+ #endif
+ 
+ #ifdef RELEASE_MODE
+-    logger->SetPriorityLevel(itk::LoggerBaseEnums::PriorityLevel::CRITICAL);
++    logger->SetPriorityLevel(itk::LoggerBase::PriorityLevelType::CRITICAL);
+ #endif
+     logger->AddLogOutput(itkcout);
+     std::string humanReadableFormat = "[%b-%d-%Y, %H:%M:%S]";
+     logger->SetHumanReadableFormat(humanReadableFormat);
+-    logger->SetTimeStampFormat(itk::LoggerBaseEnums::TimeStampFormat::HUMANREADABLE);
++    logger->SetTimeStampFormat(itk::LoggerBase::TimeStampFormatType::HUMANREADABLE);
+ 
+     // map to list module code, module name.
+     std::map<int, std::string> modesMap;
