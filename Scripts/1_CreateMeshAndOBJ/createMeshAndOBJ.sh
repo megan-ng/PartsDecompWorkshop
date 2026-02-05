@@ -5,9 +5,6 @@
 #SBATCH --mail-type=ALL
 
 #SBATCH --time=03:00:00
-#SBATCH --nodes=1
-#SBATCH --tasks=1
-#SBATCH --cpus-per-task=1
 #SBATCH --mem=700G
 
 # Load in modules

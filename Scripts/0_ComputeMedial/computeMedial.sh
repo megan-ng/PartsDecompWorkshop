@@ -9,8 +9,8 @@
 
 # --------------------------------------------------------------------
 # inputs
-inputTifPath=$1
-outputDirPath=$2
+INPUT_TIF_PATH=$1
+OUTPUT_DIR_PATH=$2
 
 # define necessary paths
 skeltoolFolderPath="/home/meganng/MyProjects/PartsDecompWorkshop/Tools/OldSkeltools/build"
@@ -24,7 +24,7 @@ export LD_LIBRARY_PATH=/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-
 cd $skeltoolFolderPath
 
 # print and run skeltool command
-echo "RUN: ./skeltool -medialSurface -input $inputTifPath -outputFolder $outputDirPath"
-./skeltool -medialSurface -input "$inputTifPath" -outputFolder "$outputDirPath"
+echo "RUN: ./skeltool -medialSurface -input $INPUT_TIF_PATH -outputFolder $OUTPUT_DIR_PATH"
+./skeltool -medialSurface -input "$INPUT_TIF_PATH" -outputFolder "$OUTPUT_DIR_PATH"
 
 echo "JOB DONE! :)"
