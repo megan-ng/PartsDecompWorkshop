@@ -1,0 +1,305 @@
+%{
+Description: Function to run parts decomposition. General step wise outline
+below.
+
+1. Obtain tip and core vertices by thresholding smoothed surface measure
+values (tips via thresholding protrusion score, and cores via thresholding
+thickness and m-score).
+2. For each tip, grow flow towards core.
+3. Define boundaries between subparts (cores, constrictions, protrusions)
+4. Create obj to visualize resulting parts decomposition.
+
+%}
+
+function vertexPartType = runPartsDecomp(mesh, allMScoreVals, allThinnessVals, smoothingTimes, coreQuantilePercent, tipQuantilePercent, sourceNodes, targetNodes, hopCounts)
+    %% STEP 0: DECLARE IMPORTANT VARIABLES
+
+    % Declare Hard coded parts decomposition parameters
+    desiredSmoothingTimeLess = 10;                                      % smoothing amount on surface measure values (affects thresholding for cores and tips)
+    smoothLessIdx = find(smoothingTimes==desiredSmoothingTimeLess);
+
+    desiredSmoothingTimeMore = 20;      
+    smoothMoreIdx = find(smoothingTimes==desiredSmoothingTimeMore);
+
+    % Obtain m-score and thinness values for all vertices
+    mScoreVals=allMScoreVals(:, smoothLessIdx); 
+    thinnessVals = allThinnessVals(: , smoothLessIdx); 
+
+    % Calculate thresholds for parts decomposition
+    mScoreTipThresh = quantile(mScoreVals, tipQuantilePercent);
+    thinnessCoreThresh = quantile(thinnessVals, coreQuantilePercent);
+    mScoreCoreThresh = quantile(mScoreVals, coreQuantilePercent);
+
+    %% STEP 1: OBTAIN TIP AND CORE VERTICES 
+
+    % Build 5-hop neighbourhood sparse matrix
+    sz=size(mesh.vertices, 1);
+    NN=sparse(sourceNodes(hopCounts<=5), targetNodes(hopCounts<=5), true, sz, sz);
+
+    % Threshold for protrusion tip points (candsM)
+    cutSel=mScoreVals>mScoreTipThresh;    % every node with M > protrusionThresh is a potential protrusion point
+    candNN=NN(:, cutSel);   % find M values for the 5-hop neighbourhood around each candidate node
+    valsNN=candNN.*mScoreVals;
+    valsNN=full(max(valsNN, [], 1))'; % compute maximum M value in each neighbourhood
+    candsM=find(cutSel);
+    candsM=candsM(mScoreVals(candsM)>=valsNN);   % find candidate nodes with M >= max(neighbourhood M) -> i.e. local maxima == tip points
+
+    % Threshold for core region
+    % low M score, low "thinness" (thinnessVals == 1-thickness) 
+    mScoreVals = allMScoreVals(:, smoothMoreIdx);  % more smoothed M score. We are only interested in "big" "definite" core regions
+    core=find(thinnessVals < thinnessCoreThresh & mScoreVals < mScoreCoreThresh);
+
+    %% STEP 2: EMPLOY FLOW FROM EACH TIP TO NEAREST CORE
+
+    % build graph representation of mesh (needed for submeshes)
+    meshGraph=graph(triangulation2adjacency(mesh.faces, mesh.vertices));
+
+    % find closest point in the core region from each tip point
+    dist=distances(meshGraph, candsM, core); 
+    [~, idx]=min(dist, [], 2); 
+    closest=core(idx); 
+
+    % preallocate memory for output variables 
+    cMin=zeros(length(candsM), length(mScoreVals));  % min M value reached for entire growing region at each step
+    cMean=zeros(length(candsM), length(mScoreVals)); % mean M value reached for entire growing region
+    minMstep = zeros(150, length(candsM));      % min M value in growing front at each step
+    meanMStep = zeros(150, length(candsM));     % mean M value in growing front at each step
+
+    cTMin=zeros(length(candsM), length(mScoreVals)); % min M value reached for entire growing region
+    cTMean=zeros(length(candsM), length(mScoreVals));% mean M value reached for entire growing region
+    meanTStep = zeros(150, length(candsM));     % mean T value in growing front at each step
+
+    % initialize region growth array; keeps track at which step (if any) each
+    % node of the mesh has been reached from each starting point
+    N=zeros(length(candsM), length(mScoreVals));
+
+    % build adjacency matrix ("1-hop neighbourhood") for each node
+    sz=size(mesh.vertices, 1);
+    NN=sparse(sourceNodes(hopCounts<=1), targetNodes(hopCounts<=1), true, sz, sz);
+
+    % run region growing independently for each tip point
+    tic
+    for i=1:length(candsM)
+
+        t=tic; % some time keeping. not really necessary but it's nice to seee the progress
+
+        % initialize region arrays
+        nn=NN(candsM(i), :);    % nn contains nodes in the "current" front of the growing region 
+                                % initially the growing front and the region are
+                                % identical with the starting point
+        nn=(max(NN(:, nn), [], 2));
+        s=find(nn);             % s contains all nodes that have previously been assigned to the region
+
+
+        MM=min(mScoreVals(s));   % min M in the region
+        MT=min(thinnessVals(s));   % mint T in the region
+
+        % add step 1 values to output variables (see above for desciption of each
+        % output array) 
+        cMin(i, nn)=MM;
+        cMean(i, nn) = mean(mScoreVals(nn)); 
+        meanMStep(1, i) = mean(mScoreVals(nn)); 
+        minMstep(1, i) = MM;
+
+        cTMin(i, nn)=MT;
+        cTMean(i, nn) = mean(thinnessVals(nn)); 
+        meanTStep(1, i) = mean(thinnessVals(nn)); 
+
+        % the starting point has been reached in 1 step (technically it should be
+        % zero, but zero is currently assigned to unassigned nodes (could be changed to -1 or NaN 
+        N(i, nn) = 1;
+        counter=1; 
+
+        % compute shortest path along the mesh from starting point to closest point
+        % in the "core" region
+        path=shortestpath(meshGraph, candsM(i), closest(i)); 
+
+        while ~isempty(nn)  % continue growing as long as a new growing front can be found 
+
+            counter=counter+1;
+
+            % advance running front (i had tested many different ways of doing
+            % this. this sparse matrix opreation was thee most efficient method I
+            % could find. 
+            nn=(max(NN(:, nn), [], 2));
+            % 1 step neighbours from the "last" growing front include 1 step
+            % "forward" and "backwards" 
+            % remove nodes that have already been assigned to the region (s) from
+            % new growing front (nn). i.e. delete backtracked nodes
+            nn(s)=0; 
+
+            % converet from sparse to id array
+            nn=find(nn);
+
+            % build the subgraph of all nodes in the current growing front (from
+            % mesh graph)
+            % find all connected components
+            sg=subgraph(meshGraph, nn); 
+            [cc, ~]=conncomp(sg); 
+
+            % find the connected component which contains the node on the shortest
+            % path to the core
+            % this connected component will become the new growing front
+            % nodes that are not connected to the shortes path will be discarded
+            % ("side arms")
+            %
+            % if the growing front does not contain any node on the shortest path
+            % the "core" has been reached and the region growing process is
+            % terminated
+            mem=find(ismember(nn, path), 1);
+
+            if(~isempty(mem))
+                % retain only nodes connected to the "path2
+                sel=cc==(cc(mem));
+                nn=nn(sel);
+
+                % add nodes in the growing fron to the assigned region
+                s=union(s, nn);
+
+                % update min/mean values
+                MM=min(mScoreVals(s));
+                MT=min(thinnessVals(s));
+
+                % add values for thee current step (i)   to the output arrays
+                N(i, nn)=counter;
+                cMin(i, nn)=MM;
+                cMean(i, nn)=mean(mScoreVals(nn));
+
+                minMstep(counter, i) = MM; 
+                meanMStep(counter, i) = mean(mScoreVals(nn));        
+
+                cTMin(i, nn)=MT;
+                cTMean(i, nn) = mean(thinnessVals(nn)); 
+                meanTStep(counter, i) = mean(thinnessVals(nn)); 
+
+            else
+                nn=[]; % an empty growing front will terminate the region growth loop 
+            end
+
+        end
+
+        % Print how long current tip to core flow ran for
+        fprintf('Tip #%d ran for %d iterations in %f seconds \n', i, counter, toc(t));
+    end
+    toc
+    
+    %% STEP 3: NOT REALLY SURE WHAT THIS DOES
+    
+    [~, idxStop] = min(meanTStep, [], 1);
+    idxMax = max(idxStop); 
+    meanTStep=meanTStep(1:idxMax, :);
+        
+    %
+    grArr = meanTStep;
+    d1Arr = zeros(size(grArr)); 
+    d2Arr = zeros(size(grArr));
+    d3Arr = zeros(size(grArr));
+    
+    for i = 1:size(grArr, 2)
+        temp=grArr(:, i);
+        sel = temp > 0; 
+        temp = temp(sel); 
+        temp = slidingDerivative(temp', 10); 
+        d1Arr(sel, i) = temp';
+        temp = slidingDerivative(temp, 10); 
+        d2Arr(sel, i) = temp';
+        temp = slidingDerivative(temp, 10); 
+        d3Arr(sel, i) = temp';
+    end
+    
+    
+    d2Seg = sign(d2Arr); 
+    col = cTMean';
+    
+    mesh.vertices = mesh.vertices - mean(mesh.vertices); 
+    
+    zeroTransission = d2Seg > 0;
+    zeroTransission = zeroTransission(1:end-1, :)-zeroTransission(2:end, :); 
+    
+    segCorr = zeros(size(d2Seg)); 
+    cutOff = 5e-06; 
+    
+    for i = 1:size(zeroTransission, 2)
+        zeroCand = find(zeroTransission(:, i)~=0); 
+        transStrength = abs(d3Arr(zeroCand, i));
+        
+        zeroCand = zeroCand(transStrength > cutOff);
+        
+            while length(zeroCand) > 1 && zeroTransission(zeroCand(1), i) == 1
+                zeroCand(1) = [];
+            end
+    
+            if length(zeroCand) < 1
+                fprintf('no ZeroTransission found for i = %d abort assign core\n', i);
+                segCorr(1:idxStop(i), i)=0.5;
+                continue; % skip rest of for loop 
+            end
+            
+            if zeroCand(1) > idxStop(i)-10
+                fprintf('no ZeroTransission before core hit for i = %d abort assign core\n', i);
+                segCorr(1:idxStop(i), i)=0.5;
+                continue; % skip rest of for loop 
+            end
+            
+            % remove zeroTransissions that are too close to the core (potential
+            % errors as T suddenly falls to 0;
+            while zeroCand(end) > idxStop(i)-9
+                zeroCand(end) = [];
+                fprintf('ZeroTransission removed for i = %d \n', i);
+            end
+            
+        segCorr(1:zeroCand(1), i)=zeroTransission(zeroCand(1), i);
+        
+        if length(zeroCand) >= 2
+            for k = 2:length(zeroCand)
+                segCorr(zeroCand(k-1):zeroCand(k), i)=zeroTransission(zeroCand(k), i);
+            end
+        else
+            k = 1; 
+        end
+        
+        segCorr(zeroCand(k)+1:end, i) = (-1)*zeroTransission(zeroCand(k), i);
+            
+    end
+    
+    colSegCorr = zeros(size(cTMean, 2), size(cTMean, 1)); 
+    
+    for i = 1:size(col, 2)  
+        neg=find(segCorr(:, i) == -1); 
+        for k = neg'
+            colSegCorr(N(i, :)==k, i) = 1; 
+        end
+        
+        pos=find(segCorr(:, i) == 1); 
+        for k = pos'
+            colSegCorr(N(i, :)==k, i) = 0.5; 
+        end
+        
+        coreSegment=find(segCorr(:, i) == 0.5); 
+        for k = coreSegment'
+            colSegCorr(N(i, :)==k, i) = 0.25; 
+        end
+    end
+    %
+    
+    if any(core)
+        colSegCorr(core, :) = 0.1;
+    end
+    
+    %
+    colProt = colSegCorr == 1; 
+    colProt = max(colProt, [], 2); 
+    
+    colBulb = colSegCorr == 0.5; 
+    colBulb = max(colBulb, [], 2); 
+    
+    colCore = colSegCorr == 0.25; 
+    colCore = max(colCore, [], 2); 
+    
+    vertexPartType = double(colProt); 
+    vertexPartType(colBulb) = 0.5;
+    vertexPartType(colCore & vertexPartType == 0) = 0.25; 
+    vertexPartType(core) = 0.1; 
+    
+end
+
