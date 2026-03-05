@@ -8,6 +8,14 @@ Output:
     - writes protrusion and thinness obj files to subfolders within
     outputOBJFolder
 
+Pre-requisites:
+    - Input data folder structure must be the following
+        - inputDataFolder/
+            - sampleName/
+                - sampleName_mesh.mat
+                - sampleName_surfaceMeasures.mat
+            - ...
+    - Add-on to write Blender obj file --> https://www.mathworks.com/matlabcentral/fileexchange/72906-save-wavefront-obj-files-simple-or-colour
 %}
 
 %% Declare global variables 
