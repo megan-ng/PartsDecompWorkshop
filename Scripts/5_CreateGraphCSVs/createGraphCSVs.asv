@@ -1,0 +1,58 @@
+%% Definition: Writes csv files containing graph connectivity information. These csvs are to be passed to an R script to create out-degree and hop distance graphs.
+%{
+Inputs:
+    - inputDataFolder
+    - outputCSVFolder
+
+Outputs:
+    - writes two csv files to outputCSVFolder
+        - sampleName_coreID
+
+%}
+%% Declare global variables
+sampleNames = ["Astro1_groundTruth", "Astro2_groundTruth", "Astro3_groundTruth", "Marmo_groundTruth"];
+
+% sampleNames = ["Astro1UnMerged"];
+data_location = "C:\Users\mcn24\Desktop\MATLAB\AstroPartsDecomp\Data_groundTruth\";
+output_location = "C:\Users\mcn24\Desktop\R\PartsDecomp\Data\255UnMergedData\";
+
+% Create figure with tiled layout: rows = samples, 2 columns (force & layered)
+nSamples = length(sampleNames);
+
+% Choose which sample to work with
+
+for i = 1:length(sampleNames)
+    
+    data_name = sampleNames(i);
+
+    % Create graph representation of astrocyte parts
+    fprintf("Loading: %s\n", data_name);
+    sampleDir = fullfile(data_location, data_name);
+
+
+    % Load required variables
+    load(strcat(sampleDir, '\', data_name, '_partsDecompResults.mat'), ...
+        'regionList', 'assigned', 'coreIDs');
+    load(strcat(sampleDir, '\', data_name, '_meshData.mat'));
+
+    % Build 1-hop neighbourhood sparse matrix (and add to mat file)
+    sz=size(mesh.vertices, 1);
+    oneHopNeighbourhood=sparse(sourceNodes(hopCounts<=1), targetNodes(hopCounts<=1), true, sz, sz);
+    save(strcat(sampleDir, '\', data_name, '_meshData.mat'), "oneHopNeighbourhood", "-append");
+
+    % Build graph with nodes and edges 
+    astroGraph = buildAstroGraph(regionList, assigned, oneHopNeighbourhood);
+
+    % % Prep data for csv export
+    % source_nodes = astroGraph.Edges.EndNodes(:,1);
+    % target_nodes = astroGraph.Edges.EndNodes(:,2);
+    % 
+    % edgeList = [source_nodes, target_nodes];
+    % graphCSVPath = strcat(output_location, data_name, "_graph.csv");
+    % writematrix(edgeList, graphCSVPath);
+    % 
+    % % Save coreIDs as a CSV file
+    % coreFileName = strcat(output_location, data_name, "_coreIDs.csv");
+    % writematrix(coreIDs(:), coreFileName);
+
+end
